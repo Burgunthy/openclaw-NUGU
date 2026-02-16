@@ -1,0 +1,89 @@
+# Home Assistant Scripts
+# scripts.yaml 또는 UI에서 스크립트로 추가
+
+script:
+  # OpenClaw 명령 전송 스크립트
+  openclaw_send_command:
+    alias: "OpenClaw 명령 전송"
+    description: "OpenClaw로 명령을 전송하여 AI 작업을 수행합니다"
+    fields:
+      command:
+        description: "실행할 명령"
+        example: "오늘 날씨 알려줘"
+        required: true
+        selector:
+          text:
+            multiline: false
+      context:
+        description: "추가 컨텍스트 정보"
+        example: '{"source": "voice"}'
+        required: false
+        selector:
+          object:
+    sequence:
+      - service: rest_command.openclaw_execute
+        data:
+          command: "{{ command }}"
+          context: "{{ context | default({}) }}"
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.openclaw_command
+        data:
+          value: "{{ command }}"
+
+  # 웹훅 서버를 통한 OpenClaw 명령 전송
+  openclaw_send_via_webhook:
+    alias: "OpenClaw 명령 전송 (웹훅 경로)"
+    description: "웹훅 서버를 통해 OpenClaw로 명령을 전송합니다"
+    fields:
+      command:
+        description: "실행할 명령"
+        required: true
+        selector:
+          text:
+      context:
+        description: "추가 컨텍스트"
+        required: false
+        selector:
+          object:
+    sequence:
+      - service: rest_command.webhook_openclaw
+        data:
+          command: "{{ command }}"
+          context: "{{ context | default({}) }}"
+
+  # OpenClaw 서버 연결 확인
+  openclaw_check_connection:
+    alias: "OpenClaw 연결 확인"
+    description: "OpenClaw 서버가 실행 중인지 확인합니다"
+    sequence:
+      - service: shell_command.openclaw_status_check
+        response_variable: result
+      - if:
+          - "{{ 'result' in result and 'status' in result['result'] }}"
+        then:
+          - service: notify.persistent_notification
+            data:
+              title: "OpenClaw 연결 성공"
+              message: "OpenClaw 서버가 정상 작동 중입니다"
+        else:
+          - service: notify.persistent_notification
+            data:
+              title: "OpenClaw 연결 실패"
+              message: "OpenClaw 서버에 연결할 수 없습니다. 설정을 확인하세요."
+
+  # NUGU에서 호출을 위한 래퍼 스크립트
+  nugu_openclaw_execute:
+    alias: "NUGU → OpenClaw 실행"
+    description: "NUGU 웹훅에서 호출하여 OpenClaw를 실행합니다"
+    fields:
+      command:
+        description: "NUGU 음성 명령"
+        required: true
+    sequence:
+      - service: rest_command.openclaw_execute
+        data:
+          command: "{{ command }}"
+          context:
+            source: "nugu"
+            timestamp: "{{ now().timestamp() }}"

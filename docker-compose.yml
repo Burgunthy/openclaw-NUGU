@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # Home Assistant
+  homeassistant:
+    image: homeassistant/home-assistant:latest
+    container_name: homeassistant
+    restart: unless-stopped
+    privileged: true
+    network_mode: host  # 호스트 네트워크 사용 (같은 PC에서 통신)
+    volumes:
+      - ./home-assistant/ha-config:/config
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - TZ=Asia/Seoul
+
+  # NUGU Webhook Server
+  nugu-webhook:
+    build: ./webhook-server
+    container_name: nugu-webhook
+    restart: unless-stopped
+    network_mode: host  # 호스트 네트워크 사용 (OpenClaw와 HA 통신)
+    volumes:
+      - ./webhook-server/config.yml:/app/config.yml:ro
+      - ./webhook-server/logs:/app/logs
+      # OpenClaw 마운트 (호스트의 OpenClaw 사용)
+      - /home/jth/.nvm/versions/node/v24.13.1/bin/openclaw:/usr/local/bin/openclaw:ro
+      - /home/jth/.openclaw:/root/.openclaw:ro
+      - /home/jth/.nvm/versions/node/v24.13.1/lib/node_modules/openclaw:/usr/local/lib/node_modules/openclaw:ro
+    environment:
+      - TZ=Asia/Seoul
+      - PYTHONUNBUFFERED=1
+      - OPENCLAW_STATE_DIR=/root/.openclaw
+      - PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Caddy 역방향 프록시 (선택사항 - 외부 접속이 필요한 경우)
+  caddy:
+    image: caddy:2-alpine
+    container_name: nugu-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      - TZ=Asia/Seoul
+
+volumes:
+  caddy-data:
+  caddy-config:

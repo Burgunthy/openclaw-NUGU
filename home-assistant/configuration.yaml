@@ -1,0 +1,33 @@
+# Home Assistant Configuration
+# configuration.yaml에 추가할 내용입니다.
+
+# OpenClaw REST Command 설정 (같은 PC)
+rest_command:
+  openclaw_execute:
+    url: "http://127.0.0.1:8080/api/execute"
+    method: POST
+    headers:
+      Authorization: "Bearer YOUR_OPENCLAW_TOKEN"
+      Content-Type: "application/json"
+    payload: '{"command": "{{ command }}", "source": "home_assistant", "context": {{ context | tojson }}}'
+    timeout: 300
+
+  # 웹훅 서버 통신 (같은 PC)
+  webhook_openclaw:
+    url: "http://127.0.0.1:5000/nugu/openclaw"
+    method: POST
+    headers:
+      Content-Type: "application/json"
+    payload: '{"command": "{{ command }}", "context": {{ context | tojson }}}'
+    timeout: 300
+
+# 입력 필드 (UI에서 테스트용)
+input_text:
+  openclaw_command:
+    name: OpenClaw Command
+    max: 255
+    initial: ""
+
+# 쉘 명령 (선택사항)
+shell_command:
+  openclaw_status_check: 'curl -s http://127.0.0.1:8080/api/status -H "Authorization: Bearer YOUR_OPENCLAW_TOKEN"'

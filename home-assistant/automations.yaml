@@ -1,0 +1,170 @@
+# Home Assistant Automations
+# automations.yaml에 추가할 자동화 규칙
+
+automation:
+  # ===========================================
+  # MQTT 기반 NUGU 연동 (권장 방식)
+  # ===========================================
+
+  # MQTT로 NUGU 명령 수신 시 웹훅 서버 호출
+  - alias: "MQTT NUGU 명령 처리"
+    description: "MQTT를 통해 수신된 NUGU 음성 명령을 웹훅 서버로 전달"
+    trigger:
+      - platform: mqtt
+        topic: "nugu/command"
+    condition: []
+    action:
+      - service: rest_command.nugu_webhook
+        data:
+          command: "{{ trigger.payload }}"
+      - service: logbook.log
+        data:
+          name: "NUGU → 웹훅서버"
+          message: "MQTT 명령 수신: {{ trigger.payload }}"
+    mode: queued
+    max: 10
+
+  # 웹훅 서버 응답을 MQTT로 발행
+  - alias: "웹훅 응답을 NUGU로 전송"
+    description: "웹훅 서버의 응답을 MQTT로 발행하여 NUGU가 읽을 수 있도록 함"
+    trigger:
+      - platform: mqtt
+        topic: "webhook/response"
+    condition: []
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "nugu/response"
+          payload: "{{ trigger.payload }}"
+    mode: single
+
+  # ===========================================
+  # 기존 웹훅 기반 연동
+  # ===========================================
+
+  # NUGU 웹훅 수신 시 OpenClaw 전달
+  - alias: "NUGU 웹훅 수신 시 OpenClaw 전달"
+    description: "웹훅 서버로부터 받은 명령을 OpenClaw로 전달"
+    trigger:
+      - platform: webhook
+        webhook_id: "nugu_to_openclaw"
+        allowed_methods:
+          - POST
+        local_only: true  # 보안을 위해 로컬만 허용 (필요시 false로 변경)
+    condition: []
+    action:
+      - service: script.openclaw_send_command
+        data:
+          command: "{{ trigger.json.command }}"
+          context: "{{ trigger.json.get('context', {}) }}"
+      - service: logbook.log
+        data:
+          name: "NUGU → OpenClaw"
+          message: "명령 전송: {{ trigger.json.command }}"
+          entity_id: sensor.openclaw_status
+    mode: single
+
+  # 웹훅 서버 경유 수신
+  - alias: "웹훅 서버 경유 NUGU 명령 처리"
+    description: "웹훅 서버를 거쳐온 NUGU 명령을 처리합니다"
+    trigger:
+      - platform: webhook
+        webhook_id: "nugu_webhook_relay"
+        allowed_methods:
+          - POST
+        local_only: true
+    condition:
+      - condition: template
+        value_template: "{{ trigger.json.command is defined }}"
+    action:
+      - choose:
+          # action이 'openclaw'인 경우
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.json.get('action', 'openclaw') == 'openclaw' }}"
+            sequence:
+              - service: script.openclaw_send_command
+                data:
+                  command: "{{ trigger.json.command }}"
+                  context: "{{ trigger.json.get('context', {}) }}"
+        # 기본 동작
+        default:
+          - service: script.openclaw_send_command
+            data:
+              command: "{{ trigger.json.command }}"
+              context: "{{ trigger.json.get('context', {}) }}"
+      - service: notify.persistent_notification
+        data:
+          title: "NUGU 명령 수신"
+          message: "{{ trigger.json.command }}"
+    mode: single
+    max_exceeded: silent
+
+  # OpenClaw 실행 알림
+  - alias: "OpenClaw 실행 시 알림"
+    description: "OpenClaw 명령이 실행될 때 알림을 표시합니다"
+    trigger:
+      - platform: event
+        event_type: call_service
+        event_data:
+          domain: script
+          service: openclaw_send_command
+    condition:
+      - condition: template
+        value_template: "{{ trigger.event.data.service_data.command is defined }}"
+    action:
+      - service: notify.persistent_notification
+        data:
+          title: "OpenClaw 실행"
+          message: "명령: {{ trigger.event.data.service_data.command }}"
+    mode: restart
+
+  # 정기적인 OpenClaw 연결 확인
+  - alias: "OpenClaw 연결 상태 모니터링"
+    description: "5분마다 OpenClaw 서버 연결을 확인합니다"
+    trigger:
+      - platform: time_pattern
+        minutes: "/5"
+    condition: []
+    action:
+      - service: shell_command.openclaw_status_check
+        response_variable: result
+      - if:
+          - condition: template
+            value_template: "{{ 'result' in result and 'status' in result.get('result', {}) }}"
+        then:
+          - service: sensor.update_state
+            target:
+              entity_id: sensor.openclaw_status
+            data:
+              state: "online"
+        else:
+          - service: sensor.update_state
+            target:
+              entity_id: sensor.openclaw_status
+            data:
+              state: "offline"
+          - service: notify.persistent_notification
+            data:
+              title: "OpenClaw 연결 실패"
+              message: "OpenClaw 서버({{ now().strftime('%H:%M') }})에 연결할 수 없습니다"
+    mode: single
+
+  # UI에서 입력 후 실행 버튼 클릭 시
+  - alias: "UI 명령 입력 후 OpenClaw 실행"
+    description: "input_text에 명령이 입력되면 자동으로 OpenClaw로 전송"
+    trigger:
+      - platform: state
+        entity_id:
+          - input_text.openclaw_command
+        from:
+          - null
+          - ""
+    condition:
+      - condition: template
+        value_template: "{{ states('input_text.openclaw_command') != '' }}"
+    action:
+      - service: script.openclaw_send_command
+        data:
+          command: "{{ states('input_text.openclaw_command') }}"
+    mode: single
