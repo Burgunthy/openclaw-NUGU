@@ -32,10 +32,16 @@ class OpenClawCLI:
             # OpenClaw 로그 확인
             logger.info(f"Executing OpenClaw command: {command}")
 
+            # OpenClaw 실행을 위한 작업 디렉토리 및 경로
+            openclaw_cwd = "/usr/local/lib/node_modules/openclaw"
+            node_path = "/usr/local/bin/node"
+            openclaw_mjs = "/usr/local/lib/node_modules/openclaw/openclaw.mjs"
+
             # OpenClaw CLI를 통해 로컬 에이전트 실행
-            # openclaw agent --local --message "{command}" --json --timeout 60
+            # node openclaw.mjs agent --local --message "{command}" --json --timeout 60
             cmd = [
-                self.openclaw_path,
+                node_path,
+                openclaw_mjs,
                 "agent",
                 "--local",
                 "--message", command,
