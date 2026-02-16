@@ -45,12 +45,16 @@ class OpenClawCLI:
 
             logger.info(f"Running command: {' '.join(cmd)}")
 
+            # OpenClaw 실행을 위한 작업 디렉토리
+            openclaw_cwd = "/usr/local/lib/node_modules/openclaw"
+
             # subprocess 실행
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=70,  # 명령 타임아웃보다 10초 여유
+                cwd=openclaw_cwd,  # OpenClaw 모듈 디렉토리에서 실행
                 env=self._get_env_with_context(context)
             )
 
