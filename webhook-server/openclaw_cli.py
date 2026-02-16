@@ -38,12 +38,13 @@ class OpenClawCLI:
             openclaw_mjs = "/usr/local/lib/node_modules/openclaw/openclaw.mjs"
 
             # OpenClaw CLI를 통해 로컬 에이전트 실행
-            # node openclaw.mjs agent --local --message "{command}" --json --timeout 60
+            # node openclaw.mjs agent --local --session-id nugu --message "{command}" --json --timeout 60
             cmd = [
                 node_path,
                 openclaw_mjs,
                 "agent",
                 "--local",
+                "--session-id", "nugu-webhook",
                 "--message", command,
                 "--json",
                 "--timeout", "60"
