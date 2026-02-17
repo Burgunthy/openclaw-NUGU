@@ -37,12 +37,191 @@ logger = logging.getLogger(__name__)
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """헬스 체크 엔드포인트"""
+    """헬스 체크 엔드포인트 - NUGU에서 호출"""
     return jsonify({
         "status": "ok",
         "service": "nugu-webhook-server",
         "timestamp": datetime.now().isoformat()
     })
+
+
+@app.route('/<action_name>', methods=['POST'])
+def nugu_backend_proxy(action_name):
+    """
+    NUGU Backend proxy API v2.0 호환 엔드포인트
+    Action Name에 따라 동적으로 URL이 결정됩니다.
+
+    URL 구조: Web URL + /Action Name
+    예: https://nugu-openclaw.loca.lt/weatherAction
+
+    Request Format (NUGU v2.0):
+    {
+        "version": "2.0",
+        "action": {
+            "actionName": "weatherAction",
+            "parameters": {
+                "command": {"type": "PLAIN_TEXT", "value": "오늘 날씨 알려줘"}
+            }
+        },
+        "context": {
+            "session": {"id": "...", "isNew": true},
+            "device": {"type": "speaker", "name": "NUGU"}
+        }
+    }
+
+    Response Format (NUGU v2.0):
+    {
+        "version": "2.0",
+        "resultCode": "OK",
+        "output": {
+            "responseText": "서울의 현재 날씨는..."
+        }
+    }
+    """
+    try:
+        data = request.json
+        if not data:
+            logger.warning("NUGU: Received empty JSON payload")
+            return jsonify({
+                "version": "2.0",
+                "resultCode": "InternalError",
+                "output": {"weatherResult": "요청을 처리할 수 없습니다."}
+            })
+
+        # NUGU v2.0 요청 파싱
+        version = data.get('version', '2.0')
+        action = data.get('action', {})
+        action_name_from_body = action.get('actionName', action_name)
+        parameters = action.get('parameters', {})
+        context = data.get('context', {})
+
+        logger.info(f"NUGU Request: action={action_name_from_body}, params={parameters}")
+
+        # 명령어 추출 - parameters에서 'command' 또는 첫 번째 파라미터 값 사용
+        command = None
+        if 'command' in parameters:
+            command = parameters['command'].get('value', '')
+        elif parameters:
+            # 첫 번째 파라미터 값 사용
+            first_param = next(iter(parameters.values()), {})
+            command = first_param.get('value', '')
+
+        # 파라미터가 없으면 Action Name에 따라 기본 명령 실행
+        if not command:
+            if 'weather' in action_name.lower():
+                command = "오늘 날씨 알려줘"
+                logger.info("NUGU: No params, using default weather command")
+            elif 'search' in action_name.lower():
+                command = "검색해줘"
+                logger.info("NUGU: No params, using default search command")
+            else:
+                logger.warning("NUGU: No command found in parameters")
+                return jsonify({
+                    "version": "2.0",
+                    "resultCode": "OK",
+                    "output": {"weatherResult": "명령을 인식하지 못했습니다. 다시 말씀해 주세요."}
+                })
+
+        logger.info(f"NUGU Command: '{command}'")
+
+        # OpenClaw CLI로 명령 실행
+        openclaw_cli = get_openclaw_cli()
+        parsed = parse_command_type(command)
+
+        result_text = ""
+
+        if parsed['type'] == 'weather':
+            location = parsed.get('location', '서울')
+            logger.info(f"NUGU: Weather query for {location}")
+            result = openclaw_cli.get_weather(location)
+            result_text = extract_response_text(result)
+
+        elif parsed['type'] == 'web_search':
+            query = parsed.get('query', command)
+            logger.info(f"NUGU: Web search for '{query}'")
+            result = openclaw_cli.search_web(query)
+            result_text = extract_response_text(result)
+
+        elif parsed['type'] == 'schedule':
+            when = parsed.get('when', '오늘')
+            logger.info(f"NUGU: Schedule query for {when}")
+            result = openclaw_cli.get_schedule(when)
+            result_text = extract_response_text(result)
+
+        else:
+            logger.info(f"NUGU: Generic command: {command}")
+            result = openclaw_cli.execute_command(
+                command,
+                context={'source': 'nugu', 'session': context.get('session', {})}
+            )
+            result_text = extract_response_text(result)
+
+        # NUGU v2.0 응답 형식 - weatherResult는 Backend Parameter 이름
+        response = {
+            "version": "2.0",
+            "resultCode": "OK",
+            "output": {
+                "weatherResult": result_text or "처리가 완료되었습니다."
+            }
+        }
+
+        logger.info(f"NUGU Response: {response}")
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"NUGU Error: {e}", exc_info=True)
+        return jsonify({
+            "version": "2.0",
+            "resultCode": "InternalError",
+            "output": {"weatherResult": f"처리 중 오류가 발생했습니다: {str(e)}"}
+        })
+
+
+def extract_response_text(result: dict) -> str:
+    """
+    OpenClaw CLI 결과에서 응답 텍스트를 추출합니다.
+
+    Args:
+        result: OpenClaw CLI 실행 결과
+
+    Returns:
+        NUGU가 읽을 수 있는 텍스트
+    """
+    if not result:
+        return "결과를 가져올 수 없습니다."
+
+    # 에러 확인
+    if 'error' in result:
+        return f"오류가 발생했습니다: {result['error']}"
+
+    # raw_output에서 텍스트 추출 (OpenClaw CLI 형식)
+    if 'raw_output' in result:
+        raw = result['raw_output']
+        if isinstance(raw, dict):
+            # payloads 배열에서 텍스트 추출
+            payloads = raw.get('payloads', [])
+            if payloads and len(payloads) > 0:
+                text = payloads[0].get('text', '')
+                if text:
+                    return text
+
+        # 직접 text 필드가 있는 경우
+        if isinstance(raw, str):
+            return raw
+
+    # result 필드가 있는 경우
+    if 'result' in result:
+        if isinstance(result['result'], str):
+            return result['result']
+        if isinstance(result['result'], dict):
+            return result['result'].get('text', str(result['result']))
+
+    # message 필드
+    if 'message' in result:
+        return result['message']
+
+    # 기본: 전체 결과를 문자열로
+    return str(result)
 
 
 @app.route('/nugu/command', methods=['POST'])

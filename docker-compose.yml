@@ -26,7 +26,7 @@ services:
       # OpenClaw 마운트 (호스트의 OpenClaw + Node.js v24 사용)
       - /home/jth/.nvm/versions/node/v24.13.1/bin/openclaw:/usr/local/bin/openclaw:ro
       - /home/jth/.nvm/versions/node/v24.13.1/bin/node:/usr/local/bin/node:ro
-      - /home/jth/.openclaw:/root/.openclaw
+      - /home/jth/.openclaw:/root/.openclaw:ro
       - /home/jth/.nvm/versions/node/v24.13.1/lib/node_modules/openclaw:/usr/local/lib/node_modules/openclaw:ro
     environment:
       - TZ=Asia/Seoul
